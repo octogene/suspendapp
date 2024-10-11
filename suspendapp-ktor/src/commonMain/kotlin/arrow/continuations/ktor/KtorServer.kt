@@ -40,17 +40,27 @@ suspend fun <
   grace: Duration = 500.milliseconds,
   timeout: Duration = 500.milliseconds,
   module: Application.() -> Unit = {}
-): ApplicationEngine =
+): EmbeddedServer<TEngine, TConfiguration> =
   install({
+    val connectors: Array<EngineConnectorConfig> = arrayOf(
+      EngineConnectorBuilder().apply {
+        this.port = port
+        this.host = host
+      }
+    )
+    val applicationProperties = serverConfig {
+      module(body = module)
+      this.watchPaths = watchPaths
+    }
+
     embeddedServer(
         factory,
-        host = host,
-        port = port,
-        watchPaths = watchPaths,
-        configure = configure,
-        module = module
-      )
-      .apply(ApplicationEngine::start)
+        applicationProperties,
+        configure
+      ).apply {
+        engineConfig.connectors.addAll(connectors)
+        start()
+      }
   }) { engine, _ ->
     engine.release(preWait, grace, timeout)
   }
@@ -73,24 +83,24 @@ suspend fun <
   TEngine : ApplicationEngine, TConfiguration : ApplicationEngine.Configuration> ResourceScope
   .server(
   factory: ApplicationEngineFactory<TEngine, TConfiguration>,
-  environment: ApplicationEngineEnvironment,
+  environment: ApplicationEnvironment,
   configure: TConfiguration.() -> Unit = {},
   preWait: Duration = 30.seconds,
   grace: Duration = 500.milliseconds,
   timeout: Duration = 500.milliseconds
-): ApplicationEngine =
-  install({ embeddedServer(factory, environment, configure).apply(ApplicationEngine::start) }) {
+): EmbeddedServer<TEngine, TConfiguration> =
+  install({ embeddedServer(factory, environment, configure).apply(EmbeddedServer<TEngine, TConfiguration>::start) }) {
     engine,
     _ ->
     engine.release(preWait, grace, timeout)
   }
 
-private suspend fun ApplicationEngine.release(
+private suspend fun <TEngine: ApplicationEngine, TConfiguration: ApplicationEngine.Configuration> EmbeddedServer<TEngine, TConfiguration>.release(
   preWait: Duration,
   grace: Duration,
   timeout: Duration
 ) {
-  if (!environment.developmentMode) {
+  if (!application.developmentMode) {
     environment.log.info(
       "prewait delay of ${preWait.inWholeMilliseconds}ms, turn it off using io.ktor.development=true"
     )
